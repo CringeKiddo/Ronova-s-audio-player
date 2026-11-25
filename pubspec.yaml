@@ -1,0 +1,49 @@
+name: ronova_audio
+description: Ronova Audio - desktop-grade 32-bit IEEE floating-point offline mobile music player.
+publish_to: "none"
+version: 0.1.0+1
+
+environment:
+  sdk: ">=3.6.0 <4.0.0"
+  flutter: ">=3.27.0"
+
+dependencies:
+  flutter:
+    sdk: flutter
+
+  # Direct Dart-to-C++ 32-bit float DSP bridge
+  ffi: ^2.1.3
+
+  # Ultra-fast indexed local track cache
+  sqflite: ^2.3.3+1
+  path_provider: ^2.1.4
+  path: ^1.9.0
+
+  # Instant persistence for themes, color wheels, favorites, EQ presets
+  shared_preferences: ^2.3.2
+
+  # Reactive state management
+  flutter_riverpod: ^2.5.1
+
+  # Storage / media audio & overlay permissions
+  permission_handler: ^11.3.1
+
+  # Custom background wallpaper selection
+  image_picker: ^1.1.2
+
+  # Dynamic album art edge-glow & gradient extraction
+  palette_generator: ^0.3.3+4
+
+  # Typography
+  google_fonts: ^6.2.1
+
+  # Smooth scrolling song titles
+  marquee: ^2.2.3
+
+dev_dependencies:
+  flutter_test:
+    sdk: flutter
+  flutter_lints: ^5.0.0
+
+flutter:
+  uses-material-design: true
