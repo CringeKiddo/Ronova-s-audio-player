@@ -9,6 +9,7 @@ import 'package:flutter_riverpod/flutter_riverpod.dart';
 import '../database/local_track_database.dart';
 import '../ffi/ronova_ffi_bindings.dart';
 import '../models/audio_track.dart';
+import '../models/playlist.dart';
 import '../models/theme_config.dart';
 import '../services/native_platform_service.dart';
 import '../storage/preferences_store.dart';
@@ -73,7 +74,7 @@ class AudioLibraryState {
   final int positionMs;
   final int durationMs;
 
-  /// 1.0 down to 0.1 in 0.05 steps.
+  /// 0.10 .. 1.50 in 0.05 steps (below 1.0 = slower, above 1.0 = faster).
   final double speed;
   final bool reverbEnabled;
 
@@ -227,7 +228,7 @@ class AudioLibraryController extends StateNotifier<AudioLibraryState> {
   double _lastBoostDb = 9.0;
 
   static const double minSpeed = 0.10;
-  static const double maxSpeed = 1.00;
+  static const double maxSpeed = 1.50;
   static const double speedStep = 0.05;
   static const double slowToggleSpeed = 0.85;
   static const double maxUpscalerDb = 24.0;
@@ -504,6 +505,34 @@ class AudioLibraryController extends StateNotifier<AudioLibraryState> {
     await _playIndex(index);
   }
 
+  /// Plays [tracks] as the queue, applying a playlist's own behaviour first (shuffle, repeat,
+  /// speed, reverb). A null setting leaves the current global value alone.
+  Future<void> playPlaylistTracks(
+    List<AudioTrack> tracks, {
+    int? startIndex,
+    bool shuffle = false,
+    PlaylistRepeat? repeat,
+    double? speed,
+    bool? reverb,
+  }) async {
+    if (tracks.isEmpty) return;
+    if (repeat != null) {
+      state = state.copyWith(
+        repeatMode: switch (repeat) {
+          PlaylistRepeat.off => RepeatMode.off,
+          PlaylistRepeat.all => RepeatMode.all,
+          PlaylistRepeat.one => RepeatMode.one,
+        },
+      );
+    }
+    state = state.copyWith(isShuffle: shuffle);
+    if (speed != null) setSpeed(speed);
+    if (reverb != null) setReverbEnabled(reverb);
+    _savePlaybackPrefs();
+    final index = startIndex ?? (shuffle ? _random.nextInt(tracks.length) : 0);
+    await playTrack(tracks[index.clamp(0, tracks.length - 1).toInt()], queue: tracks);
+  }
+
   /// Starts the visible list from a random song with shuffle on.
   Future<void> shuffleAll() async {
     final list = state.visibleTracks;
@@ -675,6 +704,7 @@ class AudioLibraryController extends StateNotifier<AudioLibraryState> {
     ffi.seekMs(target);
     _ignoreEndUntilMs = DateTime.now().millisecondsSinceEpoch + 500;
     state = state.copyWith(positionMs: target);
+    unawaited(_syncNotification());
   }
 
   void toggleShuffle() {
@@ -697,7 +727,7 @@ class AudioLibraryController extends StateNotifier<AudioLibraryState> {
   // DSP parameters (C++ engine + native overlay)
   // ------------------------------------------------------------------------------------------
 
-  /// Quantises to 0.05 steps within 0.10 .. 1.00.
+  /// Quantises to 0.05 steps within 0.10 .. 1.50.
   static double quantiseSpeed(double value) {
     final stepped = (value / speedStep).round() * speedStep;
     return (stepped.clamp(minSpeed, maxSpeed).toDouble() * 100).round() / 100.0;
@@ -709,7 +739,7 @@ class AudioLibraryController extends StateNotifier<AudioLibraryState> {
     _ffi?.setSpeed(speed);
     final wasSlowed = state.isSlowed;
     state = state.copyWith(speed: speed);
-    if (wasSlowed != state.isSlowed) unawaited(_syncNotification());
+    if (wasSlowed != state.isSlowed || state.isPlaying) unawaited(_syncNotification());
     _syncOverlay(includeSpeed: !fromOverlay);
     _savePlaybackPrefs();
   }
@@ -901,6 +931,9 @@ class AudioLibraryController extends StateNotifier<AudioLibraryState> {
       artist: track.artist,
       isPlaying: state.isPlaying,
       isSlowed: state.isSlowed,
+      positionMs: _ffi?.positionMs ?? state.positionMs,
+      durationMs: state.durationMs,
+      speed: state.speed,
       artBytes: art,
       keepArt: !trackChanged,
     );
@@ -930,6 +963,9 @@ class AudioLibraryController extends StateNotifier<AudioLibraryState> {
         unawaited(setRonovaMode(event.enabled ?? !state.ronovaModeActive));
       case NativeControlAction.setUpscaler:
         setUpscalerEnabled(event.enabled ?? !state.upscalerEnabled);
+      case NativeControlAction.seekTo:
+        final target = event.positionMs;
+        if (target != null) unawaited(seekMs(target));
       case NativeControlAction.overlayClosed:
         _ref.read(themeSettingsProvider.notifier).setOverlayEnabled(false);
       case NativeControlAction.notificationDismissed:
@@ -975,12 +1011,20 @@ class AudioLibraryController extends StateNotifier<AudioLibraryState> {
       limiter = 0.0;
     }
 
-    state = state.copyWith(
-      positionMs: position,
-      limiterReductionDb: (limiter - state.limiterReductionDb).abs() > 0.15 ? limiter : null,
-    );
+    final limiterChanged = (limiter - state.limiterReductionDb).abs() > 0.15;
+    // Paused and nothing moved: don't wake every listener 4x a second for nothing.
+    if (position != state.positionMs || limiterChanged) {
+      state = state.copyWith(
+        positionMs: position,
+        limiterReductionDb: limiterChanged ? limiter : null,
+      );
+    }
 
-    if (_tickCount % 40 == 0 && state.isPlaying) _savePlayback();
+    if (_tickCount % 40 == 0 && state.isPlaying) {
+      _savePlayback();
+      // Re-anchor the notification seek bar every ~10 s so it can never drift.
+      unawaited(_syncNotification());
+    }
   }
 
   Future<void> _onTrackEnded() async {
