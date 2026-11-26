@@ -17,6 +17,7 @@ import '../../core/theme/ronova_palette.dart';
 import '../widgets/genshin_motif_menu.dart';
 import '../widgets/ronova_widgets.dart';
 import '../widgets/center_player_box.dart';
+import 'playlists_screen.dart';
 import 'settings_screen.dart';
 
 const String kCommercialLicenseNotice =
@@ -219,21 +220,7 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with WidgetsBindi
     }
   }
 
-  Future<void> _addToPlaylistFlow(AudioTrack track) async {
-    final playlists = ref.read(audioLibraryProvider).playlists;
-    final name = await showModalBottomSheet<String>(
-      context: context,
-      backgroundColor: Colors.transparent,
-      elevation: 0,
-      isScrollControlled: true,
-      builder: (context) => _PlaylistSheet(playlists: playlists),
-    );
-    if (name == null || !mounted) return;
-    final controller = ref.read(audioLibraryProvider.notifier);
-    controller.createPlaylist(name); // no-op when it already exists
-    final added = controller.addToPlaylist(name, track);
-    showRonovaSnack(context, added ? 'Added to "$name"' : 'Already in "$name"');
-  }
+  Future<void> _addToPlaylistFlow(AudioTrack track) => showAddToPlaylistSheet(context, ref, track);
 
   Future<void> _editTagsFlow(AudioTrack track) async {
     final result = await showDialog<({String title, String artist})>(
@@ -316,17 +303,17 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with WidgetsBindi
                 Column(
                   children: <Widget>[
                     _buildHeader(palette, view.all, view.sort),
+                    // Only exists while scanning: an indeterminate bar keeps animating (and forcing
+                    // frames) even at opacity 0.
                     SizedBox(
                       height: 2.5,
-                      child: AnimatedOpacity(
-                        duration: const Duration(milliseconds: 250),
-                        opacity: view.refreshing ? 1.0 : 0.0,
-                        child: LinearProgressIndicator(
-                          minHeight: 2.5,
-                          backgroundColor: Colors.transparent,
-                          color: palette.primary,
-                        ),
-                      ),
+                      child: view.refreshing
+                          ? LinearProgressIndicator(
+                              minHeight: 2.5,
+                              backgroundColor: Colors.transparent,
+                              color: palette.primary,
+                            )
+                          : null,
                     ),
                     Expanded(
                       child: gateVisible
@@ -416,6 +403,12 @@ class _LibraryScreenState extends ConsumerState<LibraryScreen> with WidgetsBindi
             GlowIconButton(icon: Icons.search_rounded, tooltip: 'Search', onPressed: _openSearch),
             const SizedBox(width: 8),
           ],
+          GlowIconButton(
+            icon: Icons.queue_music_rounded,
+            tooltip: 'Playlists',
+            onPressed: () => unawaited(openPlaylistsScreen(context)),
+          ),
+          const SizedBox(width: 8),
           GlowIconButton(icon: Icons.sort_rounded, tooltip: 'Sort', onPressed: () => _openSortSheet(sort)),
           const SizedBox(width: 8),
           GlowIconButton(
@@ -1280,107 +1273,6 @@ class _ConfirmDeleteDialog extends ConsumerWidget {
           child: const Text('Remove', style: TextStyle(color: Color(0xFFFF5A6E), fontWeight: FontWeight.w700)),
         ),
       ],
-    );
-  }
-}
-
-class _PlaylistSheet extends ConsumerStatefulWidget {
-  const _PlaylistSheet({required this.playlists});
-
-  final Map<String, List<String>> playlists;
-
-  @override
-  ConsumerState<_PlaylistSheet> createState() => _PlaylistSheetState();
-}
-
-class _PlaylistSheetState extends ConsumerState<_PlaylistSheet> {
-  final TextEditingController _newName = TextEditingController();
-
-  @override
-  void dispose() {
-    _newName.dispose();
-    super.dispose();
-  }
-
-  void _createAndPick() {
-    final name = _newName.text.trim();
-    if (name.isEmpty) return;
-    Navigator.of(context).pop(name);
-  }
-
-  @override
-  Widget build(BuildContext context) {
-    final palette = ref.watch(ronovaPaletteProvider);
-    final names = widget.playlists.keys.toList();
-    return Padding(
-      padding: EdgeInsets.fromLTRB(12, 0, 12, 12 + MediaQuery.viewInsetsOf(context).bottom + MediaQuery.paddingOf(context).bottom),
-      child: FrostedCard(
-        blur: true,
-        strong: true,
-        glow: true,
-        radius: 28,
-        borderAlpha: 0.7,
-        padding: const EdgeInsets.fromLTRB(14, 18, 14, 14),
-        child: Column(
-          mainAxisSize: MainAxisSize.min,
-          crossAxisAlignment: CrossAxisAlignment.start,
-          children: <Widget>[
-            Padding(
-              padding: const EdgeInsets.fromLTRB(6, 0, 6, 10),
-              child: Text('Add to playlist', style: RonovaFonts.display(size: 19, color: palette.textPrimary)),
-            ),
-            ConstrainedBox(
-              constraints: const BoxConstraints(maxHeight: 240),
-              child: names.isEmpty
-                  ? Padding(
-                      padding: const EdgeInsets.all(8),
-                      child: Text('No playlists yet — create your first one below.', style: TextStyle(color: palette.textMuted)),
-                    )
-                  : ListView(
-                      shrinkWrap: true,
-                      children: <Widget>[
-                        for (final name in names)
-                          PressableScale(
-                            scale: 0.98,
-                            onTap: () {
-                              HapticFeedback.selectionClick();
-                              Navigator.of(context).pop(name);
-                            },
-                            child: Padding(
-                              padding: const EdgeInsets.symmetric(horizontal: 8, vertical: 12),
-                              child: Row(
-                                children: <Widget>[
-                                  GradientIcon(Icons.queue_music_rounded, gradient: palette.accentGradient, size: 22),
-                                  const SizedBox(width: 14),
-                                  Expanded(child: Text(name, style: TextStyle(fontSize: 15.5, color: palette.textPrimary, fontWeight: FontWeight.w600))),
-                                  Text('${widget.playlists[name]?.length ?? 0}', style: TextStyle(color: palette.textMuted)),
-                                ],
-                              ),
-                            ),
-                          ),
-                      ],
-                    ),
-            ),
-            const SizedBox(height: 8),
-            Row(
-              children: <Widget>[
-                Expanded(
-                  child: TextField(
-                    controller: _newName,
-                    textCapitalization: TextCapitalization.sentences,
-                    cursorColor: palette.primary,
-                    style: TextStyle(color: palette.textPrimary),
-                    onSubmitted: (_) => _createAndPick(),
-                    decoration: _fieldDecoration(palette, 'New playlist'),
-                  ),
-                ),
-                const SizedBox(width: 10),
-                GlowIconButton(icon: Icons.add_rounded, filled: true, onPressed: _createAndPick),
-              ],
-            ),
-          ],
-        ),
-      ),
     );
   }
 }

@@ -16,6 +16,7 @@ import '../../core/services/native_platform_service.dart';
 import '../../core/theme/ronova_palette.dart';
 import '../widgets/hsv_color_wheel.dart';
 import '../widgets/ronova_widgets.dart';
+import '../widgets/video_background.dart';
 import 'equalizer_screen.dart';
 
 Future<void> openSettingsScreen(BuildContext context) {
@@ -55,11 +56,42 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with WidgetsBin
 
   Future<void> _finishOverlayPermissionFlow() async {
     final granted = await NativePlatformService.instance.canDrawOverlays();
-    if (!granted || !mounted) return;
+    if (!mounted) return;
+    if (!granted) {
+      await _showRestrictedHelp();
+      return;
+    }
     final result = await ref.read(audioLibraryProvider.notifier).enableOverlay();
     if (!mounted) return;
     if (!result.started) {
       showRonovaSnack(context, 'The floating "R" could not start.');
+    }
+  }
+
+  /// Shown when the user comes back from Android's settings without the permission. On Android 13+
+  /// a sideloaded APK has "restricted settings", which greys the toggle out until it is allowed
+  /// from the App info page.
+  Future<void> _showRestrictedHelp() async {
+    final open = await showDialog<bool>(
+      context: context,
+      builder: (ctx) => AlertDialog(
+        title: const Text('Toggle greyed out?'),
+        content: const Text(
+          'Android blocks some permissions for apps installed from an APK file.\n\n'
+          '1. Tap "Open app info"\n'
+          '2. Tap the \u22EE menu (top right)\n'
+          '3. Choose "Allow restricted settings"\n'
+          '4. Go back and enable "Display over other apps" for Ronova Audio.',
+        ),
+        actions: <Widget>[
+          TextButton(onPressed: () => Navigator.of(ctx).pop(false), child: const Text('Later')),
+          TextButton(onPressed: () => Navigator.of(ctx).pop(true), child: const Text('Open app info')),
+        ],
+      ),
+    );
+    if (open == true) {
+      _awaitingOverlayPermission = true;
+      await NativePlatformService.instance.openAppDetails();
     }
   }
 
@@ -80,19 +112,22 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with WidgetsBin
     }
   }
 
-  Future<void> _pickWallpaper() async {
+  Future<void> _pickWallpaper({bool video = false}) async {
     if (_pickingWallpaper) return;
     setState(() => _pickingWallpaper = true);
     try {
-      final picked = await ImagePicker().pickImage(
-        source: ImageSource.gallery,
-        maxWidth: 2160,
-        maxHeight: 2160,
-        imageQuality: 92,
-      );
+      final picker = ImagePicker();
+      final XFile? picked = video
+          ? await picker.pickVideo(source: ImageSource.gallery)
+          : await picker.pickImage(
+              source: ImageSource.gallery,
+              maxWidth: 2160,
+              maxHeight: 2160,
+              imageQuality: 92,
+            );
       if (picked == null) return;
       final dir = await getApplicationSupportDirectory();
-      final extension = p.extension(picked.path).isEmpty ? '.jpg' : p.extension(picked.path);
+      final extension = p.extension(picked.path).isEmpty ? (video ? '.mp4' : '.jpg') : p.extension(picked.path);
       final target = p.join(dir.path, 'wallpaper_${DateTime.now().millisecondsSinceEpoch}$extension');
       await File(picked.path).copy(target);
       if (!mounted) return;
@@ -240,15 +275,24 @@ class _SettingsScreenState extends ConsumerState<SettingsScreen> with WidgetsBin
                                 child: _GradientButton(
                                   palette: palette,
                                   icon: Icons.photo_library_rounded,
-                                  label: _pickingWallpaper ? 'Opening...' : 'Choose photo',
-                                  onPressed: _pickingWallpaper ? null : _pickWallpaper,
+                                  label: _pickingWallpaper ? 'Opening...' : 'Photo',
+                                  onPressed: _pickingWallpaper ? null : () => _pickWallpaper(),
                                 ),
                               ),
-                              const SizedBox(width: 10),
+                              const SizedBox(width: 8),
+                              Expanded(
+                                child: _GradientButton(
+                                  palette: palette,
+                                  icon: Icons.video_library_rounded,
+                                  label: _pickingWallpaper ? 'Opening...' : 'Video',
+                                  onPressed: _pickingWallpaper ? null : () => _pickWallpaper(video: true),
+                                ),
+                              ),
+                              const SizedBox(width: 6),
                               TextButton(
                                 onPressed: config.backgroundImagePath == null ? null : _resetWallpaper,
                                 child: Text(
-                                  'Reset Wallpaper',
+                                  'Reset',
                                   style: TextStyle(
                                     color: config.backgroundImagePath == null ? palette.textMuted : palette.accentText,
                                   ),
@@ -763,7 +807,21 @@ class _WallpaperPreview extends StatelessWidget {
           fit: StackFit.expand,
           children: <Widget>[
             ColoredBox(color: palette.bg),
-            if (path != null) ...<Widget>[
+            if (path != null && isVideoPath(path)) ...<Widget>[
+              Center(
+                child: Column(
+                  mainAxisSize: MainAxisSize.min,
+                  children: <Widget>[
+                    Icon(Icons.movie_rounded, color: palette.accentText, size: 34),
+                    const SizedBox(height: 6),
+                    Text('Video wallpaper (muted, looping)', style: TextStyle(color: palette.textSecondary, fontSize: 12.5)),
+                  ],
+                ),
+              ),
+              ColoredBox(
+                color: (palette.isAbyss ? Colors.black : Colors.white).withValues(alpha: config.backgroundDimOpacity * 0.5),
+              ),
+            ] else if (path != null) ...<Widget>[
               Image.file(
                 File(path),
                 fit: BoxFit.cover,
@@ -780,7 +838,7 @@ class _WallpaperPreview extends StatelessWidget {
                   children: <Widget>[
                     Icon(Icons.wallpaper_rounded, color: palette.textMuted, size: 30),
                     const SizedBox(height: 6),
-                    Text('No wallpaper — living aurora is active', style: TextStyle(color: palette.textMuted, fontSize: 12.5)),
+                    Text('No wallpaper — aurora background is active', style: TextStyle(color: palette.textMuted, fontSize: 12.5)),
                   ],
                 ),
               ),
