@@ -17,6 +17,7 @@ class PreferencesStore {
   static const String _kEqState = 'ronova.eq_state.v1';
   static const String _kBootCount = 'ronova.boot_count.v1';
   static const String _kPlaylists = 'ronova.playlists.v1';
+  static const String _kPlaylistsV2 = 'ronova.playlists.v2';
   static const String _kPlaybackPrefs = 'ronova.playback_prefs.v1';
 
   static Future<PreferencesStore> open() async {
@@ -110,6 +111,30 @@ class PreferencesStore {
 
   Future<bool> savePlaylists(Map<String, List<String>> playlists) {
     return _prefs.setString(_kPlaylists, jsonEncode(playlists));
+  }
+
+  // ---- Playlists v2 (rich, customizable playlists stored as JSON) ----
+
+  /// Null when v2 has never been saved (the provider then migrates the legacy name -> paths map).
+  List<Map<String, Object?>>? loadPlaylistsV2() {
+    final raw = _prefs.getString(_kPlaylistsV2);
+    if (raw == null) return null;
+    try {
+      final decoded = jsonDecode(raw);
+      if (decoded is List) {
+        return <Map<String, Object?>>[
+          for (final item in decoded)
+            if (item is Map) Map<String, Object?>.from(item),
+        ];
+      }
+    } on FormatException {
+      // Corrupted payload: start empty.
+    }
+    return <Map<String, Object?>>[];
+  }
+
+  Future<bool> savePlaylistsV2(List<Map<String, Object?>> playlists) {
+    return _prefs.setString(_kPlaylistsV2, jsonEncode(playlists));
   }
 
   // ---- Playback preferences (sort order, shuffle, repeat, reverb, upscaler ...) ----
