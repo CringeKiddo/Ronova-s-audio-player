@@ -129,6 +129,9 @@ object NativeChannelRouter {
                     artist = call.argument<String>("artist") ?: "",
                     isPlaying = call.argument<Boolean>("isPlaying") ?: false,
                     isSlowed = call.argument<Boolean>("isSlowed") ?: false,
+                    positionMs = (call.argument<Number>("positionMs") ?: 0).toLong(),
+                    durationMs = (call.argument<Number>("durationMs") ?: 0).toLong(),
+                    speed = (call.argument<Number>("speed") ?: 1.0).toFloat(),
                     artBytes = call.argument<ByteArray>("artBytes"),
                     keepArt = call.argument<Boolean>("keepArt") ?: false,
                 )
@@ -145,12 +148,35 @@ object NativeChannelRouter {
             "canDrawOverlays" -> result.success(Settings.canDrawOverlays(appContext))
 
             "openOverlaySettings" -> {
-                val intent = Intent(
-                    Settings.ACTION_MANAGE_OVERLAY_PERMISSION,
-                    Uri.parse("package:${appContext.packageName}"),
-                ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK)
+                // Try the per-app page first, then the generic list, then App info (where the
+                // "Allow restricted settings" menu lives on sideloaded installs).
+                val pkg = Uri.parse("package:${appContext.packageName}")
+                val attempts = listOf(
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION, pkg),
+                    Intent(Settings.ACTION_MANAGE_OVERLAY_PERMISSION),
+                    Intent(Settings.ACTION_APPLICATION_DETAILS_SETTINGS, pkg),
+                )
+                var opened = false
+                for (intent in attempts) {
+                    try {
+                        appContext.startActivity(intent.addFlags(Intent.FLAG_ACTIVITY_NEW_TASK))
+                        opened = true
+                        break
+                    } catch (_: Exception) {
+                        // Next fallback.
+                    }
+                }
+                result.success(opened)
+            }
+
+            "openAppDetails" -> {
                 try {
-                    appContext.startActivity(intent)
+                    appContext.startActivity(
+                        Intent(
+                            Settings.ACTION_APPLICATION_DETAILS_SETTINGS,
+                            Uri.parse("package:${appContext.packageName}"),
+                        ).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK),
+                    )
                     result.success(true)
                 } catch (e: Exception) {
                     result.success(false)
