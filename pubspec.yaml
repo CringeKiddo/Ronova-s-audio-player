@@ -34,6 +34,9 @@ dependencies:
   # Dynamic album art edge-glow & gradient extraction
   palette_generator: ^0.3.3+4
 
+  # Looping video wallpapers
+  video_player: ^2.9.2
+
   # Typography
   google_fonts: ^6.2.1
 
