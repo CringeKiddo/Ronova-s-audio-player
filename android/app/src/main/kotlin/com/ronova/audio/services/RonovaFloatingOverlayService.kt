@@ -87,8 +87,8 @@ class RonovaFloatingOverlayService : Service() {
         private const val BASE_BUBBLE_DP = 58
         private const val EDGE_MARGIN_DP = 6
         private const val MIN_SPEED = 0.10f
-        private const val MAX_SPEED = 1.00f
-        private const val SPEED_STEPS = 90  // 0.10x .. 1.00x in 0.01 steps
+        private const val MAX_SPEED = 1.50f
+        private const val SPEED_STEPS = 140  // 0.10x .. 1.50x in 0.01 steps
         private const val SPEED_EMIT_INTERVAL_MS = 80L
 
         @Volatile

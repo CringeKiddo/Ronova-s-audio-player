@@ -44,6 +44,11 @@ class RonovaMediaPlaybackService : Service() {
         val artist: String,
         val isPlaying: Boolean,
         val isSlowed: Boolean,
+        /** Current track position / length in ms. Drives the seek bar in the notification shade. */
+        val positionMs: Long = 0L,
+        val durationMs: Long = 0L,
+        /** Real engine speed (0.10 .. 1.50); lets Android extrapolate the seek bar while playing. */
+        val speed: Float = 1.0f,
         val artBytes: ByteArray? = null,
         /** When true, [artBytes] is ignored and the current artwork is kept. */
         val keepArt: Boolean = false,
@@ -115,6 +120,11 @@ class RonovaMediaPlaybackService : Service() {
         override fun onStop() = emitPlayPause(play = false, source = "mediaButton")
         override fun onSkipToNext() = RonovaEventBus.emit("onNext", mapOf("source" to "mediaButton"))
         override fun onSkipToPrevious() = RonovaEventBus.emit("onPrev", mapOf("source" to "mediaButton"))
+        override fun onSeekTo(pos: Long) {
+            // Optimistic: move the bar right away, Flutter confirms through updateState().
+            applySnapshot(snapshot.copy(positionMs = pos, keepArt = true), forceForeground = false)
+            RonovaEventBus.emit("onSeekTo", mapOf("source" to "notification", "positionMs" to pos))
+        }
         override fun onCustomAction(action: String?, extras: Bundle?) {
             if (action == ACTION_TOGGLE_SLOW) handleToggleSlow("mediaButton")
         }
@@ -210,7 +220,10 @@ class RonovaMediaPlaybackService : Service() {
     private fun handleToggleSlow(source: String) {
         val slowed = !snapshot.isSlowed
         // Optimistic: flip the button immediately; Flutter confirms through updateState().
-        applySnapshot(snapshot.copy(isSlowed = slowed, keepArt = true), forceForeground = false)
+        applySnapshot(
+            snapshot.copy(isSlowed = slowed, speed = if (slowed) SLOW_SPEED else 1.0f, keepArt = true),
+            forceForeground = false,
+        )
         RonovaEventBus.emit(
             "onToggleSlow",
             mapOf(
@@ -231,6 +244,7 @@ class RonovaMediaPlaybackService : Service() {
         val metadata = MediaMetadataCompat.Builder()
             .putString(MediaMetadataCompat.METADATA_KEY_TITLE, snapshot.title.ifBlank { "Ronova Audio" })
             .putString(MediaMetadataCompat.METADATA_KEY_ARTIST, snapshot.artist)
+            .putLong(MediaMetadataCompat.METADATA_KEY_DURATION, snapshot.durationMs.coerceAtLeast(0L))
             .apply { artBitmap?.let { putBitmap(MediaMetadataCompat.METADATA_KEY_ALBUM_ART, it) } }
             .build()
         session.setMetadata(metadata)
@@ -240,13 +254,15 @@ class RonovaMediaPlaybackService : Service() {
             PlaybackStateCompat.ACTION_PLAY_PAUSE or
             PlaybackStateCompat.ACTION_SKIP_TO_NEXT or
             PlaybackStateCompat.ACTION_SKIP_TO_PREVIOUS or
+            PlaybackStateCompat.ACTION_SEEK_TO or
             PlaybackStateCompat.ACTION_STOP
         val state = PlaybackStateCompat.Builder()
             .setActions(actions)
             .setState(
                 if (snapshot.isPlaying) PlaybackStateCompat.STATE_PLAYING else PlaybackStateCompat.STATE_PAUSED,
-                PlaybackStateCompat.PLAYBACK_POSITION_UNKNOWN,
-                if (snapshot.isPlaying) (if (snapshot.isSlowed) SLOW_SPEED else 1.0f) else 0.0f,
+                // A real position + duration is what makes Android draw the seek bar.
+                snapshot.positionMs.coerceAtLeast(0L),
+                if (snapshot.isPlaying) snapshot.speed.coerceIn(0.1f, 1.5f) else 0.0f,
             )
             // Android 13+ builds its media controls from the playback state, so expose the slow toggle there too.
             .addCustomAction(
@@ -293,7 +309,7 @@ class RonovaMediaPlaybackService : Service() {
             .setSmallIcon(R.drawable.ic_stat_ronova)
             .setContentTitle(s.title.ifBlank { "Ronova Audio" })
             .setContentText(s.artist)
-            .setSubText(if (s.isSlowed) "Slowed + Reverb · 0.85x" else null)
+            .setSubText(if (s.isSlowed) "Slowed + Reverb · %.2fx".format(java.util.Locale.US, s.speed) else null)
             .setLargeIcon(artBitmap)
             .setContentIntent(openAppPendingIntent())
             .setDeleteIntent(servicePendingIntent(ACTION_DISMISSED, 5))
