@@ -18,6 +18,7 @@ enum NativeControlAction {
   toggleReverb,
   toggleRonova,
   setUpscaler,
+  seekTo,
   overlayClosed,
   notificationDismissed,
   audioRouteChanged,
@@ -31,7 +32,8 @@ enum NativeControlSource { notification, overlay, mediaButton, noisy, hardware, 
 /// Which fields are set depends on [action]:
 /// * [NativeControlAction.playPause]: [play] (desired state)
 /// * [NativeControlAction.toggleSlow]: [slowed] (desired state) and [speed] (0.85 or 1.0)
-/// * [NativeControlAction.setSpeed]: [speed] (0.10 .. 1.00)
+/// * [NativeControlAction.setSpeed]: [speed] (0.10 .. 1.50)
+/// * [NativeControlAction.seekTo]: [positionMs] (notification / lock-screen seek bar)
 /// * [NativeControlAction.toggleReverb] / [toggleRonova] / [setUpscaler]: [enabled]
 /// * [NativeControlAction.audioRouteChanged]: [hardware]
 @immutable
@@ -43,6 +45,7 @@ class NativeControlEvent {
     this.enabled,
     this.slowed,
     this.speed,
+    this.positionMs,
     this.hardware,
   });
 
@@ -52,6 +55,7 @@ class NativeControlEvent {
   final bool? enabled;
   final bool? slowed;
   final double? speed;
+  final int? positionMs;
   final HeadsetHardwareInfo? hardware;
 
   @override
@@ -257,6 +261,9 @@ class NativePlatformService {
     required String artist,
     required bool isPlaying,
     required bool isSlowed,
+    int positionMs = 0,
+    int durationMs = 0,
+    double speed = 1.0,
     Uint8List? artBytes,
     bool keepArt = false,
   }) {
@@ -265,6 +272,9 @@ class NativePlatformService {
       'artist': artist,
       'isPlaying': isPlaying,
       'isSlowed': isSlowed,
+      'positionMs': positionMs,
+      'durationMs': durationMs,
+      'speed': speed,
       'artBytes': keepArt ? null : artBytes,
       'keepArt': keepArt,
     });
@@ -278,6 +288,9 @@ class NativePlatformService {
 
   /// Opens Android's "Display over other apps" screen for this app.
   Future<bool> openOverlaySettings() async => (await _invoke<bool>('openOverlaySettings')) ?? false;
+
+  /// Opens this app's Android "App info" page (where "Allow restricted settings" lives).
+  Future<bool> openAppDetails() async => (await _invoke<bool>('openAppDetails')) ?? false;
 
   Future<bool> isOverlayRunning() async => (await _invoke<bool>('isOverlayRunning')) ?? false;
 
@@ -383,6 +396,13 @@ class NativePlatformService {
           action: NativeControlAction.setUpscaler,
           source: source,
           enabled: args['enabled'] as bool?,
+        );
+      case 'onSeekTo':
+        final pos = asDouble(args['positionMs']);
+        event = NativeControlEvent(
+          action: NativeControlAction.seekTo,
+          source: source,
+          positionMs: pos?.round(),
         );
       case 'onOverlayClosed':
         event = NativeControlEvent(action: NativeControlAction.overlayClosed, source: source);
