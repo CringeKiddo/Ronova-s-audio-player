@@ -12,6 +12,7 @@ import 'package:marquee/marquee.dart';
 import '../../core/providers/theme_settings_provider.dart';
 import '../../core/services/native_platform_service.dart';
 import '../../core/theme/ronova_palette.dart';
+import 'video_background.dart';
 
 /// Typography helpers. Display text uses Outfit through google_fonts; if the font cannot be
 /// fetched (first launch while offline) Flutter's default font is used instead.
@@ -41,6 +42,17 @@ abstract final class RonovaFonts {
       );
     }
   }
+}
+
+/// Real-time backdrop blur re-blurs everything behind it on EVERY frame (scrolling lists, the
+/// animated player box ...), which is by far the most expensive thing on mid-range GPUs.
+/// Surfaces are drawn with a near-opaque "frosted" fill instead. Flip this to `true` to get the
+/// true glass blur back (at the cost of FPS).
+const bool kUseBackdropBlur = false;
+
+Widget maybeBackdropBlur({required double sigma, required Widget child}) {
+  if (!kUseBackdropBlur) return child;
+  return BackdropFilter(filter: ui.ImageFilter.blur(sigmaX: sigma, sigmaY: sigma), child: child);
 }
 
 String formatDurationMs(int ms) {
@@ -274,15 +286,18 @@ class FrostedCard extends ConsumerWidget {
   Widget build(BuildContext context, WidgetRef ref) {
     final p = ref.watch(ronovaPaletteProvider);
     final borderRadius = BorderRadius.circular(radius);
+    // With real blur off, blur-flagged cards get a near-opaque fill so list rows scrolling behind
+    // them (e.g. the docked mini-player) stay unreadable-through, like frosted glass.
+    final glassFill = Color.alphaBlend(strong ? p.surfaceStrong : p.surface, p.bg).withValues(alpha: 0.95);
     Widget box = Container(
       padding: padding,
       decoration: BoxDecoration(
-        color: strong ? p.surfaceStrong : p.surface,
+        color: (blur && !kUseBackdropBlur) ? glassFill : (strong ? p.surfaceStrong : p.surface),
         borderRadius: borderRadius,
       ),
       child: child,
     );
-    if (blur) {
+    if (blur && kUseBackdropBlur) {
       box = ClipRRect(
         borderRadius: borderRadius,
         child: BackdropFilter(
@@ -636,15 +651,10 @@ class RonovaBackground extends ConsumerStatefulWidget {
   ConsumerState<RonovaBackground> createState() => _RonovaBackgroundState();
 }
 
-class _RonovaBackgroundState extends ConsumerState<RonovaBackground> with SingleTickerProviderStateMixin {
-  late final AnimationController _drift =
-      AnimationController(vsync: this, duration: const Duration(seconds: 48))..repeat();
-
-  @override
-  void dispose() {
-    _drift.dispose();
-    super.dispose();
-  }
+class _RonovaBackgroundState extends ConsumerState<RonovaBackground> {
+  // The aurora used to drift forever, repainting the whole screen 60x/s. It is now painted once
+  // (static) which removes a constant full-screen raster cost.
+  static const Animation<double> _drift = AlwaysStoppedAnimation<double>(0.12);
 
   @override
   Widget build(BuildContext context) {
@@ -658,13 +668,15 @@ class _RonovaBackgroundState extends ConsumerState<RonovaBackground> with Single
         ColoredBox(color: p.bg),
         if (wallpaper != null) ...<Widget>[
           Positioned.fill(
-            child: Image.file(
-              File(wallpaper),
-              fit: BoxFit.cover,
-              alignment: Alignment.center,
-              gaplessPlayback: true,
-              errorBuilder: (context, error, stack) => const SizedBox.shrink(),
-            ),
+            child: isVideoPath(wallpaper)
+                ? VideoBackground(path: wallpaper)
+                : Image.file(
+                    File(wallpaper),
+                    fit: BoxFit.cover,
+                    alignment: Alignment.center,
+                    gaplessPlayback: true,
+                    errorBuilder: (context, error, stack) => const SizedBox.shrink(),
+                  ),
           ),
           Positioned.fill(
             child: ColoredBox(

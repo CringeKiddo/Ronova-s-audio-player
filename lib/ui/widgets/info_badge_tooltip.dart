@@ -26,7 +26,7 @@ enum InfoTopic {
   ),
   speed(
     'Speed',
-    'Slows the song from 1.0x down to 0.1x in precise 0.05 steps. With Reverb off, only the tempo '
+    'Changes the song speed from 0.1x (slower) up to 1.5x (faster) in precise 0.05 steps. With Reverb off, only the tempo '
         'changes and voices keep their normal pitch.',
   ),
   pitchLinkedReverb(
@@ -336,8 +336,8 @@ class _PopoverLayerState extends ConsumerState<_PopoverLayer> {
                 foregroundPainter: GradientBorderPainter(gradient: borderGradient, radius: radius, width: 1.3),
                 child: ClipRRect(
                   borderRadius: BorderRadius.circular(radius),
-                  child: BackdropFilter(
-                    filter: ui.ImageFilter.blur(sigmaX: 18, sigmaY: 18),
+                  child: maybeBackdropBlur(
+                    sigma: 18,
                     child: Container(
                       color: fill,
                       padding: const EdgeInsets.fromLTRB(18, 16, 18, 16),

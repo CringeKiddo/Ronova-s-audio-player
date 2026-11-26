@@ -1,6 +1,5 @@
 import 'dart:async';
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart' hide RepeatMode;
 import 'package:flutter/services.dart';
@@ -227,20 +226,12 @@ class _CenterPlayerBoxState extends ConsumerState<CenterPlayerBox> with TickerPr
   Widget _buildBox(BuildContext context, RonovaPalette p, AudioTrack track, _BoxColors c) {
     const radius = 34.0;
     final base = p.isAbyss ? const Color(0xFF0D1120) : Colors.white;
-    final baseColor = base.withValues(alpha: p.isAbyss ? 0.80 : 0.82);
+    final baseColor = base.withValues(alpha: kUseBackdropBlur ? (p.isAbyss ? 0.80 : 0.82) : 0.94);
 
-    return CustomPaint(
-      foregroundPainter: _EdgeGlowPainter(
-        a: c.a,
-        b: c.b,
-        radius: radius,
-        spin: _edge,
-        breathe: _breathe,
-        edgeWidth: 1.8,
-        haloWidth: 9,
-        haloBlur: 11,
-      ),
-      child: DecoratedBox(
+    return Stack(
+      children: <Widget>[
+        RepaintBoundary(
+          child: DecoratedBox(
         decoration: BoxDecoration(
           borderRadius: BorderRadius.circular(radius),
           boxShadow: <BoxShadow>[
@@ -250,8 +241,8 @@ class _CenterPlayerBoxState extends ConsumerState<CenterPlayerBox> with TickerPr
         ),
         child: ClipRRect(
           borderRadius: BorderRadius.circular(radius),
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+          child: maybeBackdropBlur(
+            sigma: 26,
             child: DecoratedBox(
               decoration: BoxDecoration(
                 gradient: LinearGradient(
@@ -311,6 +302,28 @@ class _CenterPlayerBoxState extends ConsumerState<CenterPlayerBox> with TickerPr
           ),
         ),
       ),
+        ),
+        // Animated glow lives on its OWN layer: only this thin ring repaints each frame, not the
+        // whole player (shadows, gradients, text, sliders).
+        Positioned.fill(
+          child: IgnorePointer(
+            child: RepaintBoundary(
+              child: CustomPaint(
+                painter: _EdgeGlowPainter(
+                  a: c.a,
+                  b: c.b,
+                  radius: radius,
+                  spin: _edge,
+                  breathe: _breathe,
+                  edgeWidth: 1.8,
+                  haloWidth: 9,
+                  haloBlur: 7,
+                ),
+              ),
+            ),
+          ),
+        ),
+      ],
     );
   }
 
@@ -486,7 +499,7 @@ class _CenterPlayerBoxState extends ConsumerState<CenterPlayerBox> with TickerPr
                             c: c,
                             icon: Icons.speed_rounded,
                             label: '${view.$1.toStringAsFixed(2)}x',
-                            active: _speedOpen || view.$1 < 0.999,
+                            active: _speedOpen || (view.$1 - 1.0).abs() > 0.001,
                             onTap: () => setState(() => _speedOpen = !_speedOpen),
                           ),
                           InfoBadge(topic: InfoTopic.speed, size: 14, tint: c.a),
@@ -604,7 +617,7 @@ class _CenterPlayerBoxState extends ConsumerState<CenterPlayerBox> with TickerPr
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(14),
                         border: Border.all(color: c.a.withValues(alpha: 0.6)),
-                        color: speed >= 0.999 ? c.a.withValues(alpha: 0.2) : Colors.transparent,
+                        color: (speed - 1.0).abs() < 0.001 ? c.a.withValues(alpha: 0.2) : Colors.transparent,
                       ),
                       child: Text('1.0x', style: TextStyle(fontSize: 12, fontWeight: FontWeight.w800, color: c.a)),
                     ),
@@ -684,17 +697,7 @@ class _CenterPlayerBoxState extends ConsumerState<CenterPlayerBox> with TickerPr
               clipBehavior: Clip.none,
               children: <Widget>[
                 Positioned.fill(
-                  child: CustomPaint(
-                    foregroundPainter: _EdgeGlowPainter(
-                      a: c.a,
-                      b: c.b,
-                      radius: 28,
-                      spin: _edge,
-                      breathe: _breathe,
-                      edgeWidth: 1.7,
-                      haloWidth: 6,
-                      haloBlur: 8,
-                    ),
+                  child: RepaintBoundary(
                     child: DecoratedBox(
                       decoration: BoxDecoration(
                         borderRadius: BorderRadius.circular(28),
@@ -704,6 +707,24 @@ class _CenterPlayerBoxState extends ConsumerState<CenterPlayerBox> with TickerPr
                         ],
                       ),
                       child: TrackArtwork(filePath: track.filePath, size: size, radius: 28),
+                    ),
+                  ),
+                ),
+                Positioned.fill(
+                  child: IgnorePointer(
+                    child: RepaintBoundary(
+                      child: CustomPaint(
+                        painter: _EdgeGlowPainter(
+                          a: c.a,
+                          b: c.b,
+                          radius: 28,
+                          spin: _edge,
+                          breathe: _breathe,
+                          edgeWidth: 1.7,
+                          haloWidth: 6,
+                          haloBlur: 5,
+                        ),
+                      ),
                     ),
                   ),
                 ),
@@ -719,7 +740,8 @@ class _CenterPlayerBoxState extends ConsumerState<CenterPlayerBox> with TickerPr
 
   Widget _noteBadge(_BoxColors c) {
     return IgnorePointer(
-      child: RotationTransition(
+      child: RepaintBoundary(
+        child: RotationTransition(
         turns: _spin,
         child: Container(
           width: 46,
@@ -753,6 +775,7 @@ class _CenterPlayerBoxState extends ConsumerState<CenterPlayerBox> with TickerPr
           ),
         ),
       ),
+      ),
     );
   }
 
@@ -773,11 +796,11 @@ class _CenterPlayerBoxState extends ConsumerState<CenterPlayerBox> with TickerPr
           },
           child: ClipRRect(
             borderRadius: BorderRadius.circular(20),
-            child: BackdropFilter(
-              filter: ui.ImageFilter.blur(sigmaX: 10, sigmaY: 10),
+            child: maybeBackdropBlur(
+              sigma: 10,
               child: Container(
                 padding: const EdgeInsets.symmetric(horizontal: 11, vertical: 7),
-                color: Colors.black.withValues(alpha: 0.46),
+                color: Colors.black.withValues(alpha: kUseBackdropBlur ? 0.46 : 0.66),
                 child: Row(
                   mainAxisSize: MainAxisSize.min,
                   children: <Widget>[
@@ -1405,7 +1428,7 @@ class _EdgeGlowPainter extends CustomPainter {
 }
 
 // ---------------------------------------------------------------------------------------------
-// Speed ruler: calibrated tick marks, 0.05 steps, 0.10 .. 1.00
+// Speed ruler: calibrated tick marks, 0.05 steps, 0.10 .. 1.50 (slower AND faster than normal)
 // ---------------------------------------------------------------------------------------------
 
 class _SpeedRuler extends StatelessWidget {
@@ -1434,7 +1457,7 @@ class _SpeedRuler extends StatelessWidget {
         final trackWidth = math.max(1.0, constraints.maxWidth - _pad * 2);
         double speedAt(double dx) {
           final t = ((dx - _pad) / trackWidth).clamp(0.0, 1.0).toDouble();
-          return 0.10 + t * 0.90;
+          return 0.10 + t * 1.40;
         }
 
         return GestureDetector(
@@ -1480,26 +1503,29 @@ class _RulerPainter extends CustomPainter {
     const pad = _SpeedRuler._pad;
     final trackWidth = size.width - pad * 2;
     if (trackWidth <= 0) return;
-    double xFor(double s) => pad + (s - 0.10) / 0.90 * trackWidth;
+    double xFor(double s) => pad + (s - 0.10) / 1.40 * trackWidth;
 
     const tickTop = 24.0;
     final shader = LinearGradient(colors: <Color>[colorA, colorB]).createShader(Rect.fromLTWH(pad, 0, trackWidth, size.height));
     final tickPaint = Paint()..strokeCap = StrokeCap.round;
 
-    for (var i = 0; i <= 18; i++) {
+    final litLow = math.min(speed, 1.0) - 0.0001;
+    final litHigh = math.max(speed, 1.0) + 0.0001;
+    for (var i = 0; i <= 28; i++) {
       final s = 0.10 + 0.05 * i;
       final x = xFor(s);
       final major = i.isEven;
-      final height = major ? 20.0 : 11.0;
-      // The stretch between the current speed and normal speed lights up.
-      final lit = s >= speed - 0.0001;
+      final isNormal = (s - 1.0).abs() < 0.001;
+      final height = isNormal ? 26.0 : (major ? 20.0 : 11.0);
+      // The stretch between the current speed and normal (1.0x) speed lights up.
+      final lit = s >= litLow && s <= litHigh;
       tickPaint
         ..strokeWidth = major ? 2.3 : 1.6
         ..shader = lit ? shader : null
         ..color = lit ? Colors.white : mutedColor.withValues(alpha: 0.5);
       canvas.drawLine(Offset(x, tickTop), Offset(x, tickTop + height), tickPaint);
 
-      if (major) {
+      if (((s * 100).round() % 20 == 0) || isNormal) {
         final current = (s - speed).abs() < 0.026;
         final painter = TextPainter(
           text: TextSpan(
@@ -1518,7 +1544,7 @@ class _RulerPainter extends CustomPainter {
     }
 
     // Thumb: glowing needle that sits on the current step.
-    final tx = xFor(speed.clamp(0.10, 1.0).toDouble());
+    final tx = xFor(speed.clamp(0.10, 1.5).toDouble());
     final needle = RRect.fromRectAndRadius(
       Rect.fromCenter(center: Offset(tx, tickTop + 10), width: 5, height: 40),
       const Radius.circular(3),

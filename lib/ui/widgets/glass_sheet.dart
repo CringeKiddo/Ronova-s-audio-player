@@ -1,10 +1,10 @@
 import 'dart:math' as math;
-import 'dart:ui' as ui;
 
 import 'package:flutter/material.dart';
 import 'package:flutter_riverpod/flutter_riverpod.dart';
 
 import '../../core/providers/theme_settings_provider.dart';
+import 'ronova_widgets.dart';
 
 /// Opens [builder]'s content inside a frosted-glass bottom sheet (used by the 40-preset drawer and
 /// the playback queue). The sheet lifts above the keyboard and never covers the status bar.
@@ -49,8 +49,8 @@ class GlassSheet extends ConsumerWidget {
         height: height,
         child: ClipRRect(
           borderRadius: const BorderRadius.vertical(top: Radius.circular(30)),
-          child: BackdropFilter(
-            filter: ui.ImageFilter.blur(sigmaX: 26, sigmaY: 26),
+          child: maybeBackdropBlur(
+            sigma: 26,
             child: Material(
               type: MaterialType.transparency,
               child: DecoratedBox(
